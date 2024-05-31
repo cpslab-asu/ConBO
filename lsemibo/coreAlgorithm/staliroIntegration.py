@@ -530,7 +530,7 @@ class LSemiBOOptimizer(Optimizer[float, LSemiBOResult]):
             random_samples, spec_ei,c1,c2, sample_type="multiple"
         )[0])
 
-        min_bo = np.array([random_samples[np.argmin(min_bo_val), :]])
+        min_bo = np.array([random_samples[np.argmin(min_bo_val), :]])[0, :]
         min_bo_val = np.min(min_bo_val)
 
         
