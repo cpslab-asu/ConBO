@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "LSemiBO"
+version = "0.1.3"
+description = ""
+authors = ["daittan <tanmay.khandait@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = ">=3.8,<3.11"
+numpy = "^1.23.0"
+scipy = "^1.8.1"
+scikit-optimize = "^0.9.0"
+psy-taliro = {version = "1.0.0b9", extras = ["rtamt"]}
+coverage = "^6.4.1"
+matplotlib = "^3.5.2"
+pyswarms = "^1.3.0"
+
+[tool.poetry.dev-dependencies]
+pytest = "^5.2"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
