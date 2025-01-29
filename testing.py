@@ -1,20 +1,22 @@
 import math
 import pickle
-from staliro.core import Interval
-from staliro.core.model import BasicResult, Model, ModelInputs, ModelResult, Trace
-from staliro.staliro import staliro
-from staliro.options import Options
+from staliro import Sample, SignalInput, TestOptions, staliro
+from staliro.models import Model, Result
+
+
+from staliro import TestOptions, SignalInput
 import numpy as np
 from numpy.typing import NDArray
 
-from lsemibo.coreAlgorithm import LSemiBOOptimizer
-from lsemibo.gprInterface import InternalGPR
-from lsemibo.classifierInterface import InternalClassifier
+from conbo.staliroIntegration import LSemiBOOptimizer
+from conbo.gpr import InternalGPR
+from conbo.classifier import InternalClassifier
+import staliro.optimizers as optimizers
 
-from staliro.staliro import staliro
+import staliro
 
 NLFDataT = NDArray[np.float_]
-NLFResultT = ModelResult[NLFDataT, None]
+NLFResultT = Result[NLFDataT, None]
 
 
 """ class NLFModel(Model[NLFResultT, None]):
@@ -58,14 +60,14 @@ phi_4 = "z>=1"
 fn_list_1 = [phi_2, phi_3, phi_4]
 pred_map_1 = {"x": ([0,1], 0), "y":([0, 1],1), "z":([0, 1], 2)} """
 
-class NLFModel(Model[NLFResultT, None]):
+class NLFModel(Model[list[float], None]):
     def simulate(
-        self, static: ModelInputs, intrvl: Interval
+        self, sample:Sample
     ) -> NLFResultT:
-        print(static)
+        print(sample.static)
         timestamps_array = np.array(1.0).flatten()
-        X = static.static[0]
-        Y = static.static[1]
+        X = sample.static["dim1"]
+        Y = sample.static["dim2"]
         """d0=3 * math.sin(1 * x + 0.25) + 2 * math.sin(0.25 * y + 1) + 5.55829449361776 +0.0000001
         d1=1 * math.sin(1 * x + 0.25) + 3 * math.sin(1 * y + 0.0) + 4.8475111142115015 +0.0000001
         d2=2 * math.sin(0.75 * x + 0.75) + 1 * math.sin(1 * y + 0.75) + 3.3413293823480505 +0.0000001
@@ -196,23 +198,21 @@ class NLFModel(Model[NLFResultT, None]):
        
         # print(f"True val = {d2}, {d3}, {d4}")
         data_array = np.hstack((d0,d1,d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13, d14, d15, d16, d17, d18, d19, d20, d21, d22, d23, d24, d25, d26, d27, d28, d29)).reshape((-1,1))
-        timestamps = timestamps_array
-        data_list = data_array
-        trace = Trace(timestamps, data_list)
-        return BasicResult(trace)
+        data_list = data_array.T
+        # trace = Trace(timestamps, data_list)
+        return NLFResultT(times=timestamps_array, states=data_list, extra=None)
 
 
 
 
 model = NLFModel()
 
-initial_conditions = [
-    np.array([-5,5]),
-    np.array([-5,5]),
-]
+initial_conditions = {
+    "dim1": np.array([-5,5]),
+    "dim2": np.array([-5,5]),
+}
 
-
-options = Options(runs=1, iterations=5, interval=(0, 1),  static_parameters=initial_conditions ,signals=[])
+options = TestOptions(tspan=(0,1), iterations=1, runs = 1, static_inputs=initial_conditions)
 
 phi_2 = "a>=0"
 phi_3 = "b>=0"
@@ -296,51 +296,54 @@ Benchmark_name = "NLF_trial"
 seed = 123457
 
 total_runs = 1
-from lsemibo.coreAlgorithm.specification import Requirement
+from conbo.specification import Requirement
 specification = Requirement(tf_dim, fn_list_1, pred_map_1)
+optimizer = optimizers.UniformRandom()
+runs = staliro.test(model, specification, optimizer, options)
+
+print(f"Rob. Sample for = {runs}")
+
+# for i in range(total_runs):
+
+#     optimizer = LSemiBOOptimizer( 
+#         method = "falsification_elimination",
+#         is_budget = is_budget,
+#         max_budget= max_budget,
+#         cs_budget = cs_budget,
+#         top_k = top_k,
+#         classified_sample_bias = 1,
+#         tf_dim = tf_dim,
+#         R = R,  
+#         M = M,
+#         gpr_model = InternalGPR(),
+#         classifier_model = InternalClassifier(),
+#         is_type = "lhs_sampling",
+#         cs_type= "lhs_sampling",
+#         pi_type= "lhs_sampling",
+#         seed= seed+i)
+
+#     result = staliro(model, specification, optimizer, options)
+#     with open(f'NLF_{is_budget}_{max_budget}_seed_{seed+i}.pkl', 'wb') as file:
+#         pickle.dump(result, file)
+
+# with open(f'NLF_{is_budget}_{max_budget}_seed_{seed+i}.pkl', 'rb') as f:
+#     data = pickle.load(f)
+
+# # print([x for x in data.runs[0].model_timing.durations])
+
+# print(data.runs[0].result.start_timestamp)
+# print(data.runs[0].result.iteration_timestamps)
+# x = np.array([data.runs[0].result.start_timestamp] + data.runs[0].result.iteration_timestamps)
+
+# print(np.diff(x))
 
 
-for i in range(total_runs):
-
-    optimizer = LSemiBOOptimizer( 
-        method = "falsification_elimination",
-        is_budget = is_budget,
-        max_budget= max_budget,
-        cs_budget = cs_budget,
-        top_k = top_k,
-        classified_sample_bias = 1,
-        tf_dim = tf_dim,
-        R = R,  
-        M = M,
-        gpr_model = InternalGPR(),
-        classifier_model = InternalClassifier(),
-        is_type = "lhs_sampling",
-        cs_type= "lhs_sampling",
-        pi_type= "lhs_sampling",
-        seed= seed+i)
-
-    result = staliro(model, specification, optimizer, options)
-    with open(f'NLF_{is_budget}_{max_budget}_seed_{seed+i}.pkl', 'wb') as file:
-        pickle.dump(result, file)
-
-with open(f'NLF_{is_budget}_{max_budget}_seed_{seed+i}.pkl', 'rb') as f:
-    data = pickle.load(f)
-
-# print([x for x in data.runs[0].model_timing.durations])
-
-print(data.runs[0].result.start_timestamp)
-print(data.runs[0].result.iteration_timestamps)
-x = np.array([data.runs[0].result.start_timestamp] + data.runs[0].result.iteration_timestamps)
-
-print(np.diff(x))
-
-
-#print(result)
-# for runs in range(total_runs):
+# #print(result)
+# # for runs in range(total_runs):
     
-#     lsemibo = LSemiBO(Benchmark_name, runs, is_budget, max_budget, cs_budget, top_k, 0.8, model, spec_list, predicate_mapping, tf_dim, options, R, M, is_type = "lhs_sampling", cs_type = "lhs_sampling", seed = 12345)
-#     x_train, y_train, time_taken = lsemibo.sample(InternalGPR(), InternalClassifier())
+# #     lsemibo = LSemiBO(Benchmark_name, runs, is_budget, max_budget, cs_budget, top_k, 0.8, model, spec_list, predicate_mapping, tf_dim, options, R, M, is_type = "lhs_sampling", cs_type = "lhs_sampling", seed = 12345)
+# #     x_train, y_train, time_taken = lsemibo.sample(InternalGPR(), InternalClassifier())
 
-#     print(x_train)
-#     print(y_train)
-#     print(time_taken)
+# #     print(x_train)
+# #     print(y_train)
+# #     print(time_taken)
