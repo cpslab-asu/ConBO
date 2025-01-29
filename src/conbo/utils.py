@@ -1,3 +1,4 @@
+from typing import Dict, List
 import numpy as np
 
 def _sample(cumsum_dist_list, rng):
@@ -12,9 +13,8 @@ def _sample(cumsum_dist_list, rng):
     return index
 
 #def sample_spec_gp(spec_prob, spec, top_k, seed):
-def sample_spec_gp(spec_prob, spec, top_k, rng):
+def sample_spec_gp(spec_prob:Dict[int, float], spec: List[int], top_k: int, rng:np.random.Generator) -> List[int]:
 
-    
     if top_k > len(spec) :
         raise Exception("Top-K is greater than number of spcs present. Re-check implementation")
     elif top_k == len(spec):
@@ -22,19 +22,13 @@ def sample_spec_gp(spec_prob, spec, top_k, rng):
     else:
         sampled_specs = []
 
-        while len(sampled_specs) != top_k:
-            #print("spec",spec)
-            #print("spec_prob",spec_prob)
-            
+        while len(sampled_specs) != top_k:            
             prob = [spec_prob[item] for item in spec]
             prob = [item / sum(prob) for item in prob]
             cumsum_dist_list_cl = np.insert(np.cumsum(prob),0,0)
-            
-            #index = _sample(cumsum_dist_list_cl, seed)
             index = _sample(cumsum_dist_list_cl, rng)
             sampled_specs.append(spec.pop(index))
            
-         
     return sampled_specs
 
 def sample_spec(spec_prob, unclassified_spec, classified_spec, top_k, classified_sample_bias, rng):

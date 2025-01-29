@@ -8,6 +8,7 @@ from warnings import catch_warnings
 import warnings
 
 from numpy.typing import NDArray
+import numpy as np
 
 class GPRSkeleton(ABC):
     @abstractmethod
@@ -72,7 +73,7 @@ class GPR:
 
         self.gpr_model.fit_gpr(x_train, y_train)
 
-    def predict(self, X:NDArray) -> Tuple[NDArray, NDArray]:
+    def predict(self, X:NDArray[np.float_]) -> Tuple[NDArray[np.float_], NDArray[np.float_]]:
         """Wrapper to predict from user defined gpr model
 
         Attributes:

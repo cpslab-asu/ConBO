@@ -290,7 +290,7 @@ R = 20
 M = 500
 
 
-top_k = 3
+top_k = 1
 Benchmark_name = "NLF_trial"
 #UNCOMMENT THE PICKLE LINe	
 seed = 123457
@@ -298,31 +298,31 @@ seed = 123457
 total_runs = 1
 from conbo.specification import Requirement
 specification = Requirement(tf_dim, fn_list_1, pred_map_1)
-optimizer = optimizers.UniformRandom()
-runs = staliro.test(model, specification, optimizer, options)
+# optimizer = optimizers.UniformRandom()
 
-print(f"Rob. Sample for = {runs}")
 
-# for i in range(total_runs):
+# print(f"Rob. Sample for = {runs}")
 
-#     optimizer = LSemiBOOptimizer( 
-#         method = "falsification_elimination",
-#         is_budget = is_budget,
-#         max_budget= max_budget,
-#         cs_budget = cs_budget,
-#         top_k = top_k,
-#         classified_sample_bias = 1,
-#         tf_dim = tf_dim,
-#         R = R,  
-#         M = M,
-#         gpr_model = InternalGPR(),
-#         classifier_model = InternalClassifier(),
-#         is_type = "lhs_sampling",
-#         cs_type= "lhs_sampling",
-#         pi_type= "lhs_sampling",
-#         seed= seed+i)
+for i in range(total_runs):
 
-#     result = staliro(model, specification, optimizer, options)
+    optimizer = LSemiBOOptimizer( 
+        method = "falsification_elimination",
+        is_budget = is_budget,
+        max_budget= max_budget,
+        cs_budget = cs_budget,
+        top_k = top_k,
+        classified_sample_bias = 1,
+        tf_dim = tf_dim,
+        R = R,  
+        M = M,
+        gpr_model = InternalGPR(),
+        classifier_model = InternalClassifier(),
+        is_type = "lhs_sampling",
+        cs_type= "lhs_sampling",
+        pi_type= "lhs_sampling",
+        seed= seed+i)
+    runs = staliro.test(model, specification, optimizer, options)
+    # result = staliro(model, specification, optimizer, options)
 #     with open(f'NLF_{is_budget}_{max_budget}_seed_{seed+i}.pkl', 'wb') as file:
 #         pickle.dump(result, file)
 

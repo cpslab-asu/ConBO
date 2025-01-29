@@ -53,6 +53,8 @@ class Requirement(Specification[Sequence[float], float, None]):
             self.requirements.append(Component(iter, spec, predicate_mapping_local, mapping))   
     
     def evaluate(self, trace:Trace) -> Result[Dict[int, float], None]:
+
+        print(trace)
         # states = trace.states
         # times = trace.times
         # if states.shape[0] == 0 or times.shape[0] == 0 or states.shape[0] != times.shape[0]:

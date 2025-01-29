@@ -10,13 +10,13 @@ from numpy.typing import NDArray
 
 class SpecEI:
     def __init__(self, 
-                 identifier:int, 
+                 identifier:Tuple[int, int], 
                  x_train:NDArray[np.float_], 
                  y_train_subset1:NDArray[np.float_], 
                  y_train_subset2:NDArray[np.float_], 
-                 best_point: NDArray[np.float_], 
-                 mapping_indices_1: List[np.int_], 
-                 mapping_indices_2: List[np.int_], 
+                 best_point: np.float_, 
+                 mapping_indices_1: NDArray[np.int_], 
+                 mapping_indices_2: NDArray[np.int_], 
                  gpr_model1 : GPR, 
                  gpr_model2: GPR, 
                  region_support: NDArray[np.float_|np.int_],
@@ -207,7 +207,16 @@ class SpecEI:
  
 
 class minSpecEI:
-    def __init__(self, identifier, x_train, y_train, best_point, mapping_indices, gpr_model, region_support, tf_dim, rng, sampling_type = "lhs_sampling"):
+    def __init__(self, 
+                 identifier:int, 
+                 x_train:NDArray[np.float_], 
+                 y_train:NDArray[np.float_], 
+                 best_point: float, 
+                 mapping_indices: List[int], 
+                 gpr_model:GPRSkeleton, 
+                 region_support: NDArray[np.float_], 
+                 tf_dim: int, 
+                 sampling_type: str = "lhs_sampling"):
         self.id = identifier
         self.x_train = x_train
         self.y_train = y_train
@@ -215,13 +224,12 @@ class minSpecEI:
         self.sampling_type = sampling_type
         self.region_support = region_support
         self.tf_dim = tf_dim
-        self.model = gpr_model
         self.model = deepcopy(GPR(gpr_model))
         self.model.fit(self.x_train, self.y_train)
         self.best_point = best_point
 
 
-    def _surrogate(self, x_train):
+    def _surrogate(self, x_train: NDArray[np.float_]) -> Tuple[NDArray[np.float_], NDArray[np.float_]]:
         """_surrogate Model function
 
         Args:
@@ -234,7 +242,7 @@ class minSpecEI:
 
         return self.model.predict(x_train)
 
-    def _acquisition(self, sample, sample_type="single"):
+    def _acquisition(self, sample:NDArray[np.float_], sample_type:str="single") -> NDArray[np.float_]|float:
         
         if len(sample.shape) == 1:
             sample = sample.reshape((-1,1)).T
@@ -242,7 +250,6 @@ class minSpecEI:
 
         sample_subset = sample[:, self.mapping_indices]
         curr_best = self.best_point
-        # curr_best = np.min(self.y_train)
         
         if sample_type == "multiple":
             
@@ -262,8 +269,7 @@ class minSpecEI:
                     ei = 0.0
 
                 ei_list.append(ei)
-
-            return np.array(ei_list)
+            retEI = np.array(ei_list) 
 
         elif sample_type == "single":
             mu, std = self._surrogate(sample_subset.reshape(1, -1))
@@ -278,5 +284,6 @@ class minSpecEI:
                 )
             else:
                 ei = 0.0
-            return ei
+            retEI = ei
+        return retEI
        
