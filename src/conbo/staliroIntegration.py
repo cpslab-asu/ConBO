@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import enum
 from typing import Any, List, Optional, Sequence, Callable, Tuple
 from copy import deepcopy
@@ -16,77 +16,14 @@ from math import comb
 from staliro import Sample
 from staliro.optimizers import ObjFunc, Optimizer
 
+from .behaviors import AlgorithmPreference, Behavior, Sampling, StatStorer
+
 from .sampling import uniform_sampling, lhs_sampling
 from .utils import sample_spec, sample_spec_gp
 from .specGPR import SpecEI, minSpecEI
 from .classifier import Classifier, ClassifierSkeleton
 from .gpr import GPR, GPRSkeleton
-from .specification_2 import MinimizationBehaviorRequirement, FalsificationAnyBehaviorRequirement, FalsificationAtOnceBehaviorRequirement, FalsificationIterativeBehaviorRequirement
-
-
-class Behavior(enum.IntEnum):
-    """Behavior when minimizing or falsifying components.
-
-    Attributes:
-    ----------
-        MINIMIZATION: Minimize robustness value until the budget is exhausted.
-        FALSIFICATION_ANY: Stop searching when the first falsifying component (rob < 0) is encountered.
-        FALSIFICATION_ITERATIVE: Continue falsification, eliminating falsified components,
-                                 until the budget is exhausted or all components are eliminated.
-        FALSIFICATION_AT_ONCE: Continue falsification until all components are falsified
-                               at a single sample or the budget is exhausted.
-    """
-
-    MINIMIZATION = enum.auto()
-    FALSIFICATION_ANY = enum.auto()
-    FALSIFICATION_ITERATIVE = enum.auto()
-    FALSIFICATION_AT_ONCE = enum.auto()
-
-class AlgorithmPreference(enum.IntEnum):
-    """
-    Enumeration of available algorithm preferences for optimization.
-
-    This enum defines different strategies used in the optimization process.
-    Each algorithm has distinct requirements and behaviors when interacting 
-    with the `Configuration` class.
-
-    Attributes:
-    ----------
-    CONBOPS : int
-        "Conjunctive Bayesian Optimization - Pure Sampling":
-        - Uses all components without requiring additional input parameters.
-        - Applied when full exploration is needed.
-
-    CONBOLS : int
-        "Conjunctive Bayesian Optimization - Limited Sampling":
-        - Requires `top_k` to specify the number of components considered.
-        - If `k = #R`, behaves like CONBOPS.
-        - If `k < #R`, starts with CONBOLS and may switch to CONBOPS.
-        - Switches to MINBO if `#AR = 1`.
-
-    MINBO : int
-        "Minimal Budget Optimization":
-        - Focuses on minimizing the budget while searching for solutions.
-        - Does not require `top_k` as an input.
-        - Works with both minimization and falsification strategies.
-
-    """
-    CONBOPS = enum.auto()
-    CONBOLS = enum.auto()
-    MINBO = enum.auto()
-
-class Sampling(enum.IntEnum):
-    """Behavior when falsifying case for system is encountered.
-
-    Attributes:
-     ----------
-         FALSIFICATION: Stop searching when the first falsifying case is encountered
-         MINIMIZATION: Continue searching after encountering a falsifying case until iteration
-                       budget is exhausted
-    """
-
-    LHS = enum.auto()
-    UNIF_SAMPLING = enum.auto()
+from .specification import MinimizationBehaviorRequirement, FalsificationAnyBehaviorRequirement, FalsificationAtOnceBehaviorRequirement, FalsificationIterativeBehaviorRequirement
 
 @frozen(slots=True)
 class ConjunctiveBOResult:
@@ -104,7 +41,7 @@ class ConjunctiveBOResult:
     sample_generation_time: Any
     topk_time: Any
     iteration_timestamps:Any
-    start_timestamp: Any
+
 
 @dataclass(frozen=False)
 class ConjunctiveBO(Optimizer[float, ConjunctiveBOResult]):
@@ -153,19 +90,28 @@ class ConjunctiveBO(Optimizer[float, ConjunctiveBOResult]):
     
     def _set_region_support(self, bounds):
         self.region_support = np.array((tuple(bound.astuple() for bound in bounds),))[0]
-
+    
+    @property
+    def top_k_components(self) -> int:
+        if self.algorithm == AlgorithmPreference.MINBO:
+            return 1
+        if self.algorithm == AlgorithmPreference.CONBOLS:
+            if self.top_k is not None:
+                return self.top_k
+            else:
+                raise(ValueError("top_k cannot be none in CONBOLS"))
+        if self.algorithm == AlgorithmPreference.CONBOPS:
+            return self._getSpec.num_active_components
+        else:
+            raise(ValueError("Something is wrong in choosing top_k!"))
+        
     @property
     def _getSpec(self) -> MinimizationBehaviorRequirement|FalsificationAnyBehaviorRequirement|FalsificationAtOnceBehaviorRequirement|FalsificationIterativeBehaviorRequirement:
         return self.func._func.spec
 
     def _sample(self):
-        # time_stats = {}
-                    
-
-        total_start_time = time.perf_counter()
-        start_timestamp = total_start_time
-        iteration_timestamps = []
         print(f"Starting Replication for seed {self.seed}")
+        statStorer = StatStorer()
 
         if self.is_type == Sampling.LHS:
             x_train = lhs_sampling(self.is_budget, self.region_support, self.tf_dim, self.seed)
@@ -174,17 +120,10 @@ class ConjunctiveBO(Optimizer[float, ConjunctiveBOResult]):
         else:
             raise ValueError(f"{self.is_type} not defined. Currently only Latin Hypercube Sampling and Uniform Sampling is supported.")
         
-        
         y_train = []
         for sample in x_train:
             y_train.append(self.func.eval_sample(sample))
-            iteration_timestamps.append(time.perf_counter())
-
-        topk_time = {}
-        sample_generation_time = {}
-        pred_mean_Y = {}
-        x_candidate = {}
-        optimal_pair_set = np.zeros((self.max_budget - x_train.shape[0],2))
+            statStorer(iteration_timestamps=time.perf_counter())
 
         print(f"x_train.shape[0]*******************{x_train.shape[0]}")
         print(f"self.max_budget********************{self.max_budget}")
@@ -198,29 +137,22 @@ class ConjunctiveBO(Optimizer[float, ConjunctiveBOResult]):
             
             # Sample a point
             print(f"Not yet. Current behavior is {self.behavior}.")
-            if self._getSpec.num_active_components == 1 or self.top_k == 1:
+            if self._getSpec.num_active_components == 1 or self.top_k_components == 1:
                 print(f"Running MinBO")
                 pred_sample_x, candidate_X, candidate_EI,topk_time_sample, sample_generation_time_sample = self._minbo_req(x_train, self.gpr_model)
-                sample_generation_time[self.is_budget + budget+1] = sample_generation_time_sample
-                x_candidate[budget] = candidate_X
-                pred_mean_Y[budget+3] = candidate_EI
-                x_train = np.vstack((x_train, np.array([pred_sample_x])))
-                pred_sample_y = self.func.eval_sample(pred_sample_x)
-                iteration_timestamps.append(time.perf_counter())
-                
-            
             else:
-                print(f"Running ConBO or ConBO-LS")
+                print(f"Running ConBOPS or ConBOLS")
                 sample_point_stats = self._conbo_req(x_train, self.gpr_model, self.rng)
-                pred_sample_x, candidate_X, Pred_Y, topk_time_sample, sample_generation_time_sample, optimal_pair = sample_point_stats
-                optimal_pair_set[budget, :] =  optimal_pair
-                topk_time[self.is_budget + budget+1] = topk_time_sample
-                sample_generation_time[self.is_budget + budget+1] = sample_generation_time_sample
-                x_candidate[budget] = candidate_X
-                pred_mean_Y[budget+3] = Pred_Y
-                x_train = np.vstack((x_train, np.array([pred_sample_x])))
-                pred_sample_y = self.func.eval_sample(Sample(tuple(pred_sample_x)))
-                iteration_timestamps.append(time.perf_counter())
+
+            pred_sample_x, candidate_X, Pred_Y, topk_time_sample, sample_generation_time_sample, optimal_pair = sample_point_stats
+            optimal_pair_set[budget, :] =  optimal_pair
+            topk_time[self.is_budget + budget+1] = topk_time_sample
+            sample_generation_time[self.is_budget + budget+1] = sample_generation_time_sample
+            x_candidate[budget] = candidate_X
+            pred_mean_Y[budget+3] = Pred_Y
+            x_train = np.vstack((x_train, np.array([pred_sample_x])))
+            pred_sample_y = self.func.eval_sample(Sample(tuple(pred_sample_x)))
+            iteration_timestamps.append(time.perf_counter())
                         
                     
                     
@@ -382,7 +314,7 @@ class ConjunctiveBO(Optimizer[float, ConjunctiveBOResult]):
         
         return pred_sample_x, component_x, component_ei, topk_time, sample_generation_time
 
-    def _choose_top_k_gp(self, top_k:int, best_point:np.float_, idxs: List[int], gp_dict:Dict[int, GPR], rng:np.random.Generator)->List[int]:
+    def _choose_top_k_gp(self, best_point:np.float_, idxs: List[int], gp_dict:Dict[int, GPR], rng:np.random.Generator)->List[int]:
         """
         Selects the top-k most promising specifications based on Gaussian Process (GP) predictions.
 
@@ -405,8 +337,8 @@ class ConjunctiveBO(Optimizer[float, ConjunctiveBOResult]):
 
         # Check if the number of top specifications requested is greater than or equal to the number of unfalsified components.
         # If so, all unfalsified components are returned. This avoids unnecessary computation.
-        if top_k >= self._getSpec.num_unfalsified_components:
-            sampled_specs = list(self._getSpec.unfalsified_components)
+        if self.top_k_components >= self._getSpec.num_active_components:
+            sampled_specs = list(self._getSpec.active_components)
         else:
             # If not all unfalsified components are being selected, sampling based on GP predictions is performed.
 

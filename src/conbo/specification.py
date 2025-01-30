@@ -1,5 +1,5 @@
 from typing import Sequence, Dict, Set, List, Tuple
-from abc import ABC, abstractmethod, abstractproperty
+from abc import ABC, abstractmethod
 from numpy.typing import NDArray
 
 import numpy as np
@@ -9,9 +9,9 @@ from staliro.specifications import rtamt, Specification
 from staliro.models import Trace
 from staliro.cost_func import Result
 
-from .staliroIntegration import Behavior
+from .behaviors import AlgorithmPreference, Behavior, Sampling
 
-class Component:
+class BaseComponent(ABC):
     def __init__(self, identifier:int, spec: str, pred_mapping: Dict[str, int], mapping: NDArray[np.int_]) -> None:
         self.id = identifier
         self.spec = spec
@@ -29,9 +29,11 @@ class Component:
         robustness = self.specification.evaluate(trace).value
         self.monitoring_time.append(time.perf_counter() - start_time)
         self.robustness_history.append([self.count, robustness])
-        if robustness <= 0.0:
-            self.active = False
         return robustness
+        # return robustness
+        # if self.behavior in (Behavior.FALSIFICATION_ANY, Behavior.FALSIFICATION_AT_ONCE, Behavior.FALSIFICATION_ITERATIVE):
+        #     if robustness <= 0.0:
+        #         self.active = False
     
 
 
@@ -40,7 +42,7 @@ class BaseRequirement(ABC):
         self.tf_dim = tf_dim
         self.component_list = component_list
         self.predicate_mapping = predicate_mapping
-        self.requirements:List[Component] = []
+        self.requirements:List[BaseComponent] = []
         self.overall_count = 0
         for iter, spec in enumerate(component_list):
             predicate_mapping_local = {}
@@ -151,77 +153,52 @@ class BaseRequirement(ABC):
         return indi_monitoring_times
     
 
-class MinimizationBehaviorComponent(BaseComponent):
-    def __init__(self, identifier: int, spec: str, pred_mapping: Dict[str, int], mapping: NDArray[np.int_]) -> None:
-        super().__init__(identifier, spec, pred_mapping, mapping)
-
-    def __call__(self, trace: Trace):
-        return super().__call__(trace)
+class MinimizationComponent(BaseComponent):
+    pass
     
 class MinimizationBehaviorRequirement(BaseRequirement, Specification[Sequence[float], float, None]):
     def handle_component(self, iter: int, spec: str, predicate_mapping_local: Dict[str, int], mapping: NDArray[np.int_]) -> BaseComponent:
-        return MinimizationBehaviorComponent(iter, spec, predicate_mapping_local, mapping)
+        return MinimizationComponent(iter, spec, predicate_mapping_local, mapping)
 
     @property
     def active_components(self) -> Set[int]:
-        return set([req.id for req in self.requirements if req.active])
-    
+        return set([req.id for req in self.requirements])
 
-class FalsificationAtOnceBehaviorComponent(BaseComponent):
-    def __init__(self, identifier: int, spec: str, pred_mapping: Dict[str, int], mapping: NDArray[np.int_]) -> None:
-        super().__init__(identifier, spec, pred_mapping, mapping)
 
+class FalsificationEliminationComponent(BaseComponent):
     def __call__(self, trace: Trace):
-        return super().__call__(trace)
+        robustness = super().__call__(trace)
+        if robustness <= 0.0:
+            self.active = False
+        return robustness
+
 
 class FalsificationAtOnceBehaviorRequirement(BaseRequirement, Specification[Sequence[float], float, None]):
     def handle_component(self, iter: int, spec: str, predicate_mapping_local: Dict[str, int], mapping: NDArray[np.int_]) -> BaseComponent:
-        return MinimizationBehaviorComponent(iter, spec, predicate_mapping_local, mapping)
+        return FalsificationEliminationComponent(iter, spec, predicate_mapping_local, mapping)
 
     @property
     def active_components(self) -> Set[int]:
-        return set([req.id for req in self.requirements if req.active])
-    
-
-class FalsificationIterativeBehaviorComponent(BaseComponent):
-    def __init__(self, identifier: int, spec: str, pred_mapping: Dict[str, int], mapping: NDArray[np.int_]) -> None:
-        super().__init__(identifier, spec, pred_mapping, mapping)
-
-    def __call__(self, trace: Trace):
-        robustness = super().__call__(trace)  # Correctly call parent method
-        if robustness <= 0.0:
-            self.active = False
-        return robustness
-
-class FalsificationIterativeBehaviorRequirement(BaseRequirement, Specification[Sequence[float], float, None]):
-    def handle_component(self, iter: int, spec: str, predicate_mapping_local: Dict[str, int], mapping: NDArray[np.int_]) -> BaseComponent:
-        return MinimizationBehaviorComponent(iter, spec, predicate_mapping_local, mapping)
-
-    @property
-    def active_components(self) -> Set[int]:
-        return set([req.id for req in self.requirements if req.active])
-    
-
-
-class FalsificationAnyBehaviorComponent(BaseComponent):
-    def __init__(self, identifier: int, spec: str, pred_mapping: Dict[str, int], mapping: NDArray[np.int_]) -> None:
-        super().__init__(identifier, spec, pred_mapping, mapping)
-
-    def __call__(self, trace: Trace):
-        robustness = super().__call__(trace)  # Correctly call parent method
-        if robustness <= 0.0:
-            self.active = False
-        return robustness
-    
+        return set([]) if np.all([not req.active for req in self.requirements]) else set([req.id for req in self.requirements])
 
 class FalsificationAnyBehaviorRequirement(BaseRequirement, Specification[Sequence[float], float, None]):
     def handle_component(self, iter: int, spec: str, predicate_mapping_local: Dict[str, int], mapping: NDArray[np.int_]) -> BaseComponent:
-        return MinimizationBehaviorComponent(iter, spec, predicate_mapping_local, mapping)
+        return FalsificationEliminationComponent(iter, spec, predicate_mapping_local, mapping)
+
+    @property
+    def active_components(self) -> Set[int]:
+        return set([]) if np.any([not req.active for req in self.requirements]) else set([req.id for req in self.requirements])
+    
+    
+class FalsificationIterativeBehaviorRequirement(BaseRequirement, Specification[Sequence[float], float, None]):
+    def handle_component(self, iter: int, spec: str, predicate_mapping_local: Dict[str, int], mapping: NDArray[np.int_]) -> BaseComponent:
+        return FalsificationEliminationComponent(iter, spec, predicate_mapping_local, mapping)
 
     @property
     def active_components(self) -> Set[int]:
         return set([req.id for req in self.requirements if req.active])
-    
+
+
 
 
 

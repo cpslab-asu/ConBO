@@ -8,7 +8,7 @@ from staliro import TestOptions, SignalInput
 import numpy as np
 from numpy.typing import NDArray
 
-from conbo.staliroIntegration import LSemiBOOptimizer
+from conbo.staliroIntegration import AlgorithmPreference, Behavior, ConjunctiveBO, Sampling
 from conbo.gpr import InternalGPR
 from conbo.classifier import InternalClassifier
 import staliro.optimizers as optimizers
@@ -296,22 +296,17 @@ Benchmark_name = "NLF_trial"
 seed = 123457
 
 total_runs = 1
-from conbo.specification import Requirement
-specification = Requirement(tf_dim, fn_list_1, pred_map_1)
+from conbo.specification import MinimizationBehaviorRequirement
+specification = MinimizationBehaviorRequirement(tf_dim, fn_list_1, pred_map_1)
 # optimizer = optimizers.UniformRandom()
-
-spec = CONBOLS_REQ(...)
-
-optimizer = LSemiBOOptimizer(...
-                             configuration =  
-                             ...)
 
 # print(f"Rob. Sample for = {runs}")
 
 for i in range(total_runs):
 
-    optimizer = LSemiBOOptimizer( 
-        method = "falsification_elimination",
+    optimizer = ConjunctiveBO( 
+        behavior=Behavior.MINIMIZATION,
+        algorithm = AlgorithmPreference.CONBOLS,
         is_budget = is_budget,
         max_budget= max_budget,
         cs_budget = cs_budget,
@@ -322,9 +317,9 @@ for i in range(total_runs):
         M = M,
         gpr_model = InternalGPR(),
         classifier_model = InternalClassifier(),
-        is_type = "lhs_sampling",
-        cs_type= "lhs_sampling",
-        pi_type= "lhs_sampling",
+        is_type = Sampling.LHS,
+        cs_type= Sampling.LHS,
+        pi_type= Sampling.LHS,
         seed= seed+i)
     runs = staliro.test(model, specification, optimizer, options)
     # result = staliro(model, specification, optimizer, options)
