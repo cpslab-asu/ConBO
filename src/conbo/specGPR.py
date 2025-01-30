@@ -211,7 +211,7 @@ class minSpecEI:
                  identifier:int, 
                  x_train:NDArray[np.float_], 
                  y_train:NDArray[np.float_], 
-                 best_point: float, 
+                 best_point: np.float_, 
                  mapping_indices: List[int], 
                  gpr_model:GPRSkeleton, 
                  region_support: NDArray[np.float_], 

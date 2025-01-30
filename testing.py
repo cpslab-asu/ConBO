@@ -300,6 +300,11 @@ from conbo.specification import Requirement
 specification = Requirement(tf_dim, fn_list_1, pred_map_1)
 # optimizer = optimizers.UniformRandom()
 
+spec = CONBOLS_REQ(...)
+
+optimizer = LSemiBOOptimizer(...
+                             configuration =  
+                             ...)
 
 # print(f"Rob. Sample for = {runs}")
 

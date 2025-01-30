@@ -32,7 +32,7 @@ class Component:
         return robustness
 
 class Requirement(Specification[Sequence[float], float, None]):
-    def __init__(self, tf_dim: int, component_list: List[str], predicate_mapping:Dict[str, Tuple[List, int]]) ->  None:
+    def __init__(self, tf_dim: int, component_list: List[str], predicate_mapping:Dict[str, Tuple[List, int]], method: Behavior) ->  None:
         self.tf_dim = tf_dim
         self.component_list = component_list
         self.predicate_mapping = predicate_mapping

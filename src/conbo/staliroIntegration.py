@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-from typing import Any, List, Sequence, Callable, Tuple
+import enum
+from typing import Any, List, Optional, Sequence, Callable, Tuple
 from copy import deepcopy
 from itertools import combinations
 import numpy as np
@@ -20,10 +21,75 @@ from .utils import sample_spec, sample_spec_gp
 from .specGPR import SpecEI, minSpecEI
 from .classifier import Classifier, ClassifierSkeleton
 from .gpr import GPR, GPRSkeleton
-from .specification import Requirement
+from .specification_2 import MinimizationBehaviorRequirement, FalsificationAnyBehaviorRequirement, FalsificationAtOnceBehaviorRequirement, FalsificationIterativeBehaviorRequirement
+
+
+class Behavior(enum.IntEnum):
+    """Behavior when minimizing or falsifying components.
+
+    Attributes:
+    ----------
+        MINIMIZATION: Minimize robustness value until the budget is exhausted.
+        FALSIFICATION_ANY: Stop searching when the first falsifying component (rob < 0) is encountered.
+        FALSIFICATION_ITERATIVE: Continue falsification, eliminating falsified components,
+                                 until the budget is exhausted or all components are eliminated.
+        FALSIFICATION_AT_ONCE: Continue falsification until all components are falsified
+                               at a single sample or the budget is exhausted.
+    """
+
+    MINIMIZATION = enum.auto()
+    FALSIFICATION_ANY = enum.auto()
+    FALSIFICATION_ITERATIVE = enum.auto()
+    FALSIFICATION_AT_ONCE = enum.auto()
+
+class AlgorithmPreference(enum.IntEnum):
+    """
+    Enumeration of available algorithm preferences for optimization.
+
+    This enum defines different strategies used in the optimization process.
+    Each algorithm has distinct requirements and behaviors when interacting 
+    with the `Configuration` class.
+
+    Attributes:
+    ----------
+    CONBOPS : int
+        "Conjunctive Bayesian Optimization - Pure Sampling":
+        - Uses all components without requiring additional input parameters.
+        - Applied when full exploration is needed.
+
+    CONBOLS : int
+        "Conjunctive Bayesian Optimization - Limited Sampling":
+        - Requires `top_k` to specify the number of components considered.
+        - If `k = #R`, behaves like CONBOPS.
+        - If `k < #R`, starts with CONBOLS and may switch to CONBOPS.
+        - Switches to MINBO if `#AR = 1`.
+
+    MINBO : int
+        "Minimal Budget Optimization":
+        - Focuses on minimizing the budget while searching for solutions.
+        - Does not require `top_k` as an input.
+        - Works with both minimization and falsification strategies.
+
+    """
+    CONBOPS = enum.auto()
+    CONBOLS = enum.auto()
+    MINBO = enum.auto()
+
+class Sampling(enum.IntEnum):
+    """Behavior when falsifying case for system is encountered.
+
+    Attributes:
+     ----------
+         FALSIFICATION: Stop searching when the first falsifying case is encountered
+         MINIMIZATION: Continue searching after encountering a falsifying case until iteration
+                       budget is exhausted
+    """
+
+    LHS = enum.auto()
+    UNIF_SAMPLING = enum.auto()
 
 @frozen(slots=True)
-class LSemiBOResult:
+class ConjunctiveBOResult:
     """Data class that represents the result of a uniform random optimization.
 
     Attributes:
@@ -41,34 +107,35 @@ class LSemiBOResult:
     start_timestamp: Any
 
 @dataclass(frozen=False)
-class LSemiBOOptimizer(Optimizer[float, LSemiBOResult]):
+class ConjunctiveBO(Optimizer[float, ConjunctiveBOResult]):
     """The LSemiBO optimizer provides falsifying inputs in a conjunctive requirement scenario."""
 
-    method: str
+    behavior: Behavior
+    algorithm: AlgorithmPreference
     is_budget: int
     max_budget: int
     cs_budget: int
-    top_k: int
+    top_k: Optional[int]
     classified_sample_bias: float
     tf_dim: int
     R: int
     M: int
     gpr_model: GPRSkeleton
     classifier_model: ClassifierSkeleton
-    is_type: str
-    cs_type: str
-    pi_type: str
+    is_type: Sampling
+    cs_type: Sampling
+    pi_type: Sampling
     seed: int
     
 
-    def optimize(self, func: ObjFunc[float], params: Optimizer.Params) -> LSemiBOResult:
+    def optimize(self, func: ObjFunc[float], params: Optimizer.Params) -> ConjunctiveBOResult:
         self._set_budgets()
         self._set_func_and_num_requirements(func)
         self.region_support = np.array(params.input_bounds)
         self._set_rng(params.seed)
 
         results = self._sample()
-        return LSemiBOResult(results)
+        return ConjunctiveBOResult(results)
 
     def _set_rng(self, seed):
         self.seed = self.seed
@@ -88,7 +155,7 @@ class LSemiBOOptimizer(Optimizer[float, LSemiBOResult]):
         self.region_support = np.array((tuple(bound.astuple() for bound in bounds),))[0]
 
     @property
-    def _getSpec(self) -> Requirement:
+    def _getSpec(self) -> MinimizationBehaviorRequirement|FalsificationAnyBehaviorRequirement|FalsificationAtOnceBehaviorRequirement|FalsificationIterativeBehaviorRequirement:
         return self.func._func.spec
 
     def _sample(self):
@@ -100,9 +167,9 @@ class LSemiBOOptimizer(Optimizer[float, LSemiBOResult]):
         iteration_timestamps = []
         print(f"Starting Replication for seed {self.seed}")
 
-        if self.is_type == "lhs_sampling":
+        if self.is_type == Sampling.LHS:
             x_train = lhs_sampling(self.is_budget, self.region_support, self.tf_dim, self.seed)
-        elif self.is_type == "uniform_sampling":
+        elif self.is_type == Sampling.UNIF_SAMPLING:
             x_train = uniform_sampling(self.is_budget, self.region_support, self.tf_dim, self.seed)
         else:
             raise ValueError(f"{self.is_type} not defined. Currently only Latin Hypercube Sampling and Uniform Sampling is supported.")
@@ -122,86 +189,38 @@ class LSemiBOOptimizer(Optimizer[float, LSemiBOResult]):
         print(f"x_train.shape[0]*******************{x_train.shape[0]}")
         print(f"self.max_budget********************{self.max_budget}")
         for budget in tqdm(range(self.max_budget - x_train.shape[0])):
+            print(f"Falsified Components: {self._getSpec.num_inactive_components}\n \
+                    Unfalsified components remaining: {self._getSpec.num_active_components}")
+            if self.behavior in (Behavior.FALSIFICATION_ANY, Behavior.FALSIFICATION_AT_ONCE, Behavior.FALSIFICATION_ITERATIVE):
+                # Choose to exit
+                print("Should I exit?")
+                ...
             
-            # print(f"***************************************************")
-            # print(f"********************{budget}***********************")
-            print(f"Falsified Components: {self._getSpec.num_falsified_components}\n \
-                    Unfalsified components remaining: {self._getSpec.num_unfalsified_components}")
+            # Sample a point
+            print(f"Not yet. Current behavior is {self.behavior}.")
+            if self._getSpec.num_active_components == 1 or self.top_k == 1:
+                print(f"Running MinBO")
+                pred_sample_x, candidate_X, candidate_EI,topk_time_sample, sample_generation_time_sample = self._minbo_req(x_train, self.gpr_model)
+                sample_generation_time[self.is_budget + budget+1] = sample_generation_time_sample
+                x_candidate[budget] = candidate_X
+                pred_mean_Y[budget+3] = candidate_EI
+                x_train = np.vstack((x_train, np.array([pred_sample_x])))
+                pred_sample_y = self.func.eval_sample(pred_sample_x)
+                iteration_timestamps.append(time.perf_counter())
+                
             
-            if self._getSpec.num_unfalsified_components <= self.num_requirements:
-                c1 = (self._getSpec.num_unfalsified_components == 0 and self.method == "falsification_elimination")
-                c2 = (self._getSpec.num_unfalsified_components < self.num_requirements and self.method == "falsification")
-                if c1 or c2:
-                    # time_stats["total_time"] = time.perf_counter() - total_start_time
-                    # time_stats["monitoring_time"] = self.tf_wrapper.monitoring_time
-                    # time_stats["simulation_time"] = self.tf_wrapper.sim_time
-                    # time_stats["individual_monitoring_time"] = self.requirement._get_individual_monitoring_times()
-                    # time_stats["sample_generation_time"] = sample_generation_time
-                    # time_stats["topk_time"] = topk_time
-
-
-
-                    print("All reqs falsified")
-                    print(f"Ending Replication Early for seed {self.seed}")
-                    if c1:
-                        print("**************************************")
-                        print("*******************Date Saved*******************")
-                        print("**************************************")
-                        #with open(f'NLF_conBOLS_attribute_seed_{budget}', 'wb') as file:
-                            #pickle.dump(x_candidate,pred_mean_Y, file)
-                        print("Ending early due to elimination of all reqs")
-                    elif c2:
-                        print("**************************************")
-                        print("*******************Date Saved*******************")
-                        print("**************************************")
-                        #with open(f'NLF_conBOLS_attribute_seed_{budget}', 'wb') as file:
-                            #pickle.dump(x_candidate,pred_mean_Y, file)
-                        print("Ending early due to falsification")
-                    # output_data = {}
-                    # output_data["samples"] = x_train
-                    # output_data["components"] = self.requirement._get_complete_data()
-                    # output_data["time_res"] = time_stats
-                    # print(f"Ending Replication After Exhuasting budget for Run {self.run_number} with seed {self.seed}")
-                    # with open(self.benchmark_directory.joinpath(self.benchmark_name + f"_{self.method}_point_history{self.run_number}.pkl"), "wb") as f:
-                    #     pickle.dump(output_data, f)
-                        
-                    #with open(f'NLF_conBOLS_x_candidate_{self.top_k}seed_{self.seed}', 'wb') as file:
-                        #pickle.dump(x_candidate, file) 
-                    #with open(f'NLF_conBOLS_pred_mean_Y_seed_{self.seed}', 'wb') as file:
-                        #pickle.dump(pred_mean_Y, file) 
-                    #with open(f'NLF_conBOLS_pair_pattern_{self.top_k}_seed_{self.seed}', 'wb') as file:
-                        #pickle.dump(optimal_pair_set, file) 
-
-                    return x_train, \
-                        self._getSpec._get_complete_data(), \
-                        time.perf_counter() - total_start_time,\
-                        self.func.history,\
-                        self._getSpec._get_individual_monitoring_times(),\
-                        sample_generation_time,\
-                        topk_time, iteration_timestamps, start_timestamp
-                            
-                else:
-                    if self._getSpec.num_unfalsified_components == 1 or self.top_k == 1:
-                        pred_sample_x, candidate_X, candidate_EI,topk_time_sample, sample_generation_time_sample = self._minbo_req(x_train, self.gpr_model)
-                        sample_generation_time[self.is_budget + budget+1] = sample_generation_time_sample
-                        x_candidate[budget] = candidate_X
-                        pred_mean_Y[budget+3] = candidate_EI
-                        x_train = np.vstack((x_train, np.array([pred_sample_x])))
-                        pred_sample_y = self.func.eval_sample(pred_sample_x)
-                        iteration_timestamps.append(time.perf_counter())
-                      
-                    
-                    else:
-                        sample_point_stats = self._conbo_req(x_train, self.gpr_model, self.rng)
-                        pred_sample_x, candidate_X, Pred_Y, topk_time_sample, sample_generation_time_sample, optimal_pair = sample_point_stats
-                        optimal_pair_set[budget, :] =  optimal_pair
-                        topk_time[self.is_budget + budget+1] = topk_time_sample
-                        sample_generation_time[self.is_budget + budget+1] = sample_generation_time_sample
-                        x_candidate[budget] = candidate_X
-                        pred_mean_Y[budget+3] = Pred_Y
-                        x_train = np.vstack((x_train, np.array([pred_sample_x])))
-                        pred_sample_y = self.func.eval_sample(Sample(tuple(pred_sample_x)))
-                        iteration_timestamps.append(time.perf_counter())
+            else:
+                print(f"Running ConBO or ConBO-LS")
+                sample_point_stats = self._conbo_req(x_train, self.gpr_model, self.rng)
+                pred_sample_x, candidate_X, Pred_Y, topk_time_sample, sample_generation_time_sample, optimal_pair = sample_point_stats
+                optimal_pair_set[budget, :] =  optimal_pair
+                topk_time[self.is_budget + budget+1] = topk_time_sample
+                sample_generation_time[self.is_budget + budget+1] = sample_generation_time_sample
+                x_candidate[budget] = candidate_X
+                pred_mean_Y[budget+3] = Pred_Y
+                x_train = np.vstack((x_train, np.array([pred_sample_x])))
+                pred_sample_y = self.func.eval_sample(Sample(tuple(pred_sample_x)))
+                iteration_timestamps.append(time.perf_counter())
                         
                     
                     
@@ -245,7 +264,7 @@ class LSemiBOOptimizer(Optimizer[float, LSemiBOResult]):
         """
     
         # Obtain the true function value
-        idxs, y_train = self._getSpec._generate_unfaslified_dataset()
+        idxs, y_train = self._getSpec._generate_active_dataset()
         idxs_dict = {idx: i for i, idx in enumerate(idxs)}  # Dictionary for indexing
         best_point = np.min(y_train)  # Best function value found so far
 
@@ -256,7 +275,7 @@ class LSemiBOOptimizer(Optimizer[float, LSemiBOResult]):
 
         # Convert data for classifier
         t_start_topk_time = time.perf_counter()
-        sampled_specs = self._choose_top_k_gp(best_point, idxs, gpr_model_dict, self.rng)
+        sampled_specs = self._choose_top_k_gp(top_k, best_point, idxs, gpr_model_dict, self.rng)
         y_train_classes = np.argmin(y_train, axis=1)
         
         print(f"Sampled Specifications: {sampled_specs}")
@@ -352,7 +371,7 @@ class LSemiBOOptimizer(Optimizer[float, LSemiBOResult]):
 
             y_train_subset = y_train[:, idxs_dict[component1]]
             
-            req_comp = minSpecEI(iterate, x_train, y_train_subset, best_point, mapping_indices, gpr_model, self.region_support, self.tf_dim, self.rng)
+            req_comp = minSpecEI(iterate, x_train, y_train_subset, best_point, mapping_indices, gpr_model, self.region_support, self.tf_dim)
             p_sample_x, pred_sample_ei = self.min_opt_acquisition(req_comp, self.region_support, self.tf_dim, self.rng)
             component_x.append(p_sample_x)
             component_ei.append(pred_sample_ei)
@@ -363,7 +382,7 @@ class LSemiBOOptimizer(Optimizer[float, LSemiBOResult]):
         
         return pred_sample_x, component_x, component_ei, topk_time, sample_generation_time
 
-    def _choose_top_k_gp(self, best_point:np.float_, idxs: List[int], gp_dict:Dict[int, GPR], rng:np.random.Generator)->List[int]:
+    def _choose_top_k_gp(self, top_k:int, best_point:np.float_, idxs: List[int], gp_dict:Dict[int, GPR], rng:np.random.Generator)->List[int]:
         """
         Selects the top-k most promising specifications based on Gaussian Process (GP) predictions.
 
@@ -376,19 +395,26 @@ class LSemiBOOptimizer(Optimizer[float, LSemiBOResult]):
         Returns:
             A list of indices representing the top-k selected specifications.
         """
+        # Jan 30 Comments:
+        # CONBO LS --->> k = active_components, choose 
+        # CONBO PS
+        # MIN BO
+
+
+
 
         # Check if the number of top specifications requested is greater than or equal to the number of unfalsified components.
         # If so, all unfalsified components are returned. This avoids unnecessary computation.
-        if self.top_k >= self._getSpec.num_unfalsified_components:
+        if top_k >= self._getSpec.num_unfalsified_components:
             sampled_specs = list(self._getSpec.unfalsified_components)
         else:
             # If not all unfalsified components are being selected, sampling based on GP predictions is performed.
 
             # Generate a set of test points using either Latin Hypercube Sampling (LHS) or Uniform Sampling.
             # The type of sampling is determined by self.cs_type.
-            if self.cs_type == "lhs_sampling":
+            if self.cs_type == Sampling.LHS:
                 x_test = lhs_sampling(self.cs_budget, self.region_support, self.tf_dim, self.rng)
-            elif self.cs_type == "uniform_sampling":
+            elif self.cs_type == Sampling.UNIF_SAMPLING:
                 x_test = uniform_sampling(self.cs_budget, self.region_support, self.tf_dim, self.rng)
             else:
                 raise ValueError(f"{self.cs_type} not defined. Currently only Latin Hypercube Sampling and Uniform Sampling is supported.")
@@ -436,9 +462,9 @@ class LSemiBOOptimizer(Optimizer[float, LSemiBOResult]):
 
                 classifier_model = Classifier(classifier_model_input)
                 classifier_model.fit(x_train, y_train)
-                if self.cs_type == "lhs_sampling":
+                if self.cs_type == Sampling.LHS:
                     x_test = lhs_sampling(self.cs_budget, self.region_support, self.tf_dim, self.rng)
-                elif self.cs_type == "uniform_sampling":
+                elif self.cs_type == Sampling.UNIF_SAMPLING:
                     x_test = uniform_sampling(self.cs_budget, self.region_support, self.tf_dim, self.rng)
                 else:
                     raise ValueError(f"{self.cs_type} not defined. Currently only Latin Hypercube Sampling and Uniform Sampling is supported.")
