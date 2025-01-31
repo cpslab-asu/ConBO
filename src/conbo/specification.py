@@ -77,12 +77,6 @@ class BaseRequirement(ABC):
     @property
     @abstractmethod
     def active_components(self) -> Set[int]:
-        # Add feature to select active components based on Bhevaior and then go to evaluate
-        # if self.behavior in (Behavior.MINIMIZATION, Behavior.FALSIFICATION_AT_ONCE):
-        #     active_components = set([req.id for req in self.requirements])
-        # else:
-        #     active_components = set([req.id for req in self.requirements if req.active])
-        # return active_components
         raise NotImplementedError("active_components() not implemented")
     
     @property

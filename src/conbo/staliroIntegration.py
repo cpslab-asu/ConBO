@@ -33,14 +33,10 @@ class ConjunctiveBOResult:
         average_cost: The average cost of all the samples selected.
     """
 
-    samples: Any
-    components: Any
-    total_time: Any
-    history: Any
-    individual_monitoring_time: Any
-    sample_generation_time: Any
-    topk_time: Any
-    iteration_timestamps:Any
+    samples: NDArray
+    data: Dict[int, NDArray[np.float_]]
+    sampleStatHistory: StatStorer
+    
 
 
 @dataclass(frozen=False)
@@ -71,8 +67,8 @@ class ConjunctiveBO(Optimizer[float, ConjunctiveBOResult]):
         self.region_support = np.array(params.input_bounds)
         self._set_rng(params.seed)
 
-        results = self._sample()
-        return ConjunctiveBOResult(results)
+        samples, data, sampleStats = self._sample()
+        return ConjunctiveBOResult(samples, data, sampleStats)
 
     def _set_rng(self, seed):
         self.seed = self.seed
@@ -130,42 +126,29 @@ class ConjunctiveBO(Optimizer[float, ConjunctiveBOResult]):
         for budget in tqdm(range(self.max_budget - x_train.shape[0])):
             print(f"Falsified Components: {self._getSpec.num_inactive_components}\n \
                     Unfalsified components remaining: {self._getSpec.num_active_components}")
-            if self.behavior in (Behavior.FALSIFICATION_ANY, Behavior.FALSIFICATION_AT_ONCE, Behavior.FALSIFICATION_ITERATIVE):
-                # Choose to exit
-                print("Should I exit?")
-                ...
-            
-            # Sample a point
-            print(f"Not yet. Current behavior is {self.behavior}.")
-            if self._getSpec.num_active_components == 1 or self.top_k_components == 1:
-                print(f"Running MinBO")
-                pred_sample_x, candidate_X, candidate_EI,topk_time_sample, sample_generation_time_sample = self._minbo_req(x_train, self.gpr_model)
+            if self.behavior in (Behavior.FALSIFICATION_ANY, Behavior.FALSIFICATION_AT_ONCE, Behavior.FALSIFICATION_ITERATIVE) and self._getSpec.num_active_components == 0:
+                return x_train, \
+                    self._getSpec._get_complete_data(),\
+                    statStorer
             else:
-                print(f"Running ConBOPS or ConBOLS")
-                sample_point_stats = self._conbo_req(x_train, self.gpr_model, self.rng)
+                # Sample a point
+                print(f"Not yet. Current behavior is {self.behavior}.")
+                if self._getSpec.num_active_components == 1 or self.top_k_components == 1:
+                    print(f"Running MinBO")
+                    sample_point_stats = self._minbo_req(x_train, self.gpr_model)
+                else:
+                    print(f"Running ConBO")
+                    sample_point_stats = self._conbo_req(x_train, self.gpr_model, self.rng)
 
-            pred_sample_x, candidate_X, Pred_Y, topk_time_sample, sample_generation_time_sample, optimal_pair = sample_point_stats
-            optimal_pair_set[budget, :] =  optimal_pair
-            topk_time[self.is_budget + budget+1] = topk_time_sample
-            sample_generation_time[self.is_budget + budget+1] = sample_generation_time_sample
-            x_candidate[budget] = candidate_X
-            pred_mean_Y[budget+3] = Pred_Y
-            x_train = np.vstack((x_train, np.array([pred_sample_x])))
-            pred_sample_y = self.func.eval_sample(Sample(tuple(pred_sample_x)))
-            iteration_timestamps.append(time.perf_counter())
-                        
-                    
+                pred_sample_x, candidate_X, Pred_Y, topk_time_sample, sample_generation_time_sample, optimal_pair = sample_point_stats
+                x_train = np.vstack((x_train, np.array([pred_sample_x])))
+                pred_sample_y = self.func.eval_sample(pred_sample_x)
+                statStorer(iteration_timestamps=time.perf_counter(), top_k_time=topk_time_sample, sample_generation_time=sample_generation_time_sample, optimal_pair=optimal_pair)
                     
         print(f"Ending Replication After Exhuasting budget for seed {self.seed}")
-       
-
         return x_train, \
-                self._getSpec._get_complete_data(), \
-                time.perf_counter() - total_start_time,\
-                self.func.history,\
-                self._getSpec._get_individual_monitoring_times(),\
-                sample_generation_time,\
-                topk_time, iteration_timestamps, start_timestamp
+                self._getSpec._get_complete_data(),\
+                statStorer
 
     def _conbo_req(self, 
                   x_train:NDArray[np.float_], 
@@ -207,7 +190,7 @@ class ConjunctiveBO(Optimizer[float, ConjunctiveBOResult]):
 
         # Convert data for classifier
         t_start_topk_time = time.perf_counter()
-        sampled_specs = self._choose_top_k_gp(top_k, best_point, idxs, gpr_model_dict, self.rng)
+        sampled_specs = self._choose_top_k_gp(best_point, idxs, gpr_model_dict, self.rng)
         y_train_classes = np.argmin(y_train, axis=1)
         
         print(f"Sampled Specifications: {sampled_specs}")
@@ -276,7 +259,7 @@ class ConjunctiveBO(Optimizer[float, ConjunctiveBOResult]):
     
     def _minbo_req(self, x_train:NDArray, gpr_model:GPRSkeleton):
         t_start_sample_gen_time = time.perf_counter()
-        idxs, y_train = self._getSpec._generate_unfaslified_dataset()
+        idxs, y_train = self._getSpec._generate_active_dataset()
    
 
         idxs_dict = dict(zip(idxs, list(range(len(idxs)))))
@@ -312,7 +295,7 @@ class ConjunctiveBO(Optimizer[float, ConjunctiveBOResult]):
         pred_sample_x = component_x[np.argmax(component_ei)]
         sample_generation_time = time.perf_counter() - t_start_sample_gen_time
         
-        return pred_sample_x, component_x, component_ei, topk_time, sample_generation_time
+        return pred_sample_x, component_x, component_ei, topk_time, sample_generation_time, sampled_specs
 
     def _choose_top_k_gp(self, best_point:np.float_, idxs: List[int], gp_dict:Dict[int, GPR], rng:np.random.Generator)->List[int]:
         """
@@ -370,7 +353,7 @@ class ConjunctiveBO(Optimizer[float, ConjunctiveBOResult]):
             gp_prob_dict = dict(zip(idxs, spec_prob))
 
             # Sample the top-k specifications based on their probabilities.
-            sampled_specs = sample_spec_gp(gp_prob_dict, idxs, self.top_k, rng)
+            sampled_specs = sample_spec_gp(gp_prob_dict, idxs, self.top_k_components, rng)
                     
         return sampled_specs
 
@@ -381,8 +364,8 @@ class ConjunctiveBO(Optimizer[float, ConjunctiveBOResult]):
                       classifier_model_input:ClassifierSkeleton, 
                       rng: np.random.Generator) -> List[int]:
         
-        if self.top_k >= self._getSpec.num_unfalsified_components:
-            sampled_specs = list(self._getSpec.unfalsified_components)
+        if self.top_k_components >= self._getSpec.num_active_components:
+            sampled_specs = list(self._getSpec.active_components)
         else:
             if np.unique(y_train).shape[0] == 1:
                 _sampled_specs = np.unique(y_train)
@@ -423,7 +406,7 @@ class ConjunctiveBO(Optimizer[float, ConjunctiveBOResult]):
                         spec_prob[spec_number] = counts[np.where(unique == spec_number)][0] / self.cs_budget
                         classified_spec_prob.append(spec_number)
 
-                _sampled_specs = sample_spec(spec_prob, unclassified_spec_prob, classified_spec_prob, self.top_k, self.classified_sample_bias, rng)
+                _sampled_specs = sample_spec(spec_prob, unclassified_spec_prob, classified_spec_prob, self.top_k_components, self.classified_sample_bias, rng)
                 sampled_specs = []
                 
                 for iter in _sampled_specs:

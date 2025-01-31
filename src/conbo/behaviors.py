@@ -72,13 +72,11 @@ class Sampling(enum.IntEnum):
 
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=False)
 class SampleStats:
     iteration_timestamps: Any = None
     topk_time: Any = None
     sample_generation_time: Any = None
-    pred_mean_Y: Any = None
-    x_candidate: Any = None
     optimal_pair_set: Any = None
 
 class StatStorer:
@@ -86,5 +84,5 @@ class StatStorer:
         self.initial_timestamp = time.perf_counter()
         self.history = []
     
-    def __call__(self, iteration_timestamps=None, top_k_time=None, sample_generation_time=None, topk_time=None):
-        self.history.append(SampleStats(iteration_timestamps, top_k_time, sample_generation_time, topk_time))
+    def __call__(self, iteration_timestamps=None, top_k_time=None, sample_generation_time=None, optimal_pair=None):
+        self.history.append(SampleStats(iteration_timestamps, top_k_time, sample_generation_time, optimal_pair))

@@ -1,4 +1,6 @@
 from typing import List, Tuple
+
+from conbo.behaviors import Sampling
 from .gpr import GPRSkeleton, GPR
 from .sampling import lhs_sampling, uniform_sampling
 from scipy.stats import norm, pearsonr
@@ -24,7 +26,7 @@ class SpecEI:
                  M: int, 
                  tf_dim: int, 
                  rng: random.Generator, 
-                 sampling_type: str = "lhs_sampling"):
+                 sampling_type: Sampling = Sampling.LHS):
 
         self.id = identifier
         self.x_train = x_train
@@ -54,9 +56,9 @@ class SpecEI:
         cdf_all_sum_2 = 0
         
         for _ in range(self.R):
-            if self.sampling_type == "lhs_sampling":
+            if self.sampling_type == Sampling.LHS:
                 samples = lhs_sampling(self.M, self.region_support, self.tf_dim, self.rng)
-            elif self.sampling_type == "uniform_sampling":
+            elif self.sampling_type == Sampling.UNIF_SAMPLING:
                 samples = uniform_sampling(self.M, self.region_support, self.tf_dim, self.rng)
             else:
                 raise ValueError(f"{self.sampling_type} not defined. Currently only Latin Hypercube Sampling and Uniform Sampling is supported.")
@@ -212,11 +214,11 @@ class minSpecEI:
                  x_train:NDArray[np.float_], 
                  y_train:NDArray[np.float_], 
                  best_point: np.float_, 
-                 mapping_indices: List[int], 
+                 mapping_indices: NDArray[np.int_], 
                  gpr_model:GPRSkeleton, 
                  region_support: NDArray[np.float_], 
                  tf_dim: int, 
-                 sampling_type: str = "lhs_sampling"):
+                 sampling_type: Sampling = Sampling.LHS):
         self.id = identifier
         self.x_train = x_train
         self.y_train = y_train
